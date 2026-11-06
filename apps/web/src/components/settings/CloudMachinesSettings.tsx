@@ -31,6 +31,12 @@ export function CloudMachinesSettings({
   const label = provider === "boat" ? "Boat" : "Instabox";
   const command = provider === "boat" ? manageBoat : manageInstabox;
   const allowed = useAtomValue(command.permissionAtom(environmentId));
+  const canPair = useAtomValue(
+    command.permissionAtom(environmentId, { action: "create", name: "permission-check" }),
+  );
+  const canConfigure = useAtomValue(
+    command.permissionAtom(environmentId, { action: "disconnect" }),
+  );
   const manage = useAtomCommand(command, { reportFailure: false });
   const pair = useAtomCommand(connectPairing, { reportFailure: false });
   const [account, setAccount] = useState<CloudMachineResult | null>(null);
@@ -124,7 +130,7 @@ export function CloudMachinesSettings({
               required
             />
           </div>
-          <Button type="submit" disabled={busy || !allowed || !apiKey.trim()}>
+          <Button type="submit" disabled={busy || !canConfigure || !apiKey.trim()}>
             Connect account
           </Button>
           <p className="w-full text-xs text-muted-foreground">
@@ -242,11 +248,11 @@ export function CloudMachinesSettings({
                   />
                 </div>
                 <p className="w-full text-xs text-muted-foreground">
-                  The initial task uses the snapshot's provider sign-in and incurs agent usage.
+                  The initial task uses the machine's provider sign-in and incurs agent usage.
                 </p>
               </>
             ) : null}
-            <Button type="submit" disabled={busy || !allowed}>
+            <Button type="submit" disabled={busy || !canPair}>
               Create and connect
             </Button>
             <p className="w-full text-xs text-muted-foreground">
@@ -265,7 +271,7 @@ export function CloudMachinesSettings({
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={busy || !allowed}
+                      disabled={busy || !canPair}
                       onClick={() => void perform({ action: "connect", machineId: machine.id })}
                     >
                       Connect
@@ -303,7 +309,7 @@ export function CloudMachinesSettings({
           <Button
             size="sm"
             variant="ghost"
-            disabled={busy || !allowed}
+            disabled={busy || !canConfigure}
             onClick={() => void perform({ action: "disconnect" })}
           >
             Disconnect account

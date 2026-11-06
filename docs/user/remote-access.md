@@ -241,13 +241,16 @@ For Antigravity's Google callback on a remote host, see
 On a host running this fork, open **Settings → Environments**, choose **Instabox cloud** or
 **Boat cloud**, and select **Manage**. Connect that provider's API key with machine and snapshot
 management permissions. The key stays in that T3 host's secret store; other clients need
-permission to maintain that host to use it.
+permission to maintain that host to list or stop machines. Account changes also require settings
+permission. Creating or connecting requires full client access because pairing grants that access
+to the new environment.
 
 Choose a machine name and optionally a setup snapshot, repository HTTPS URL and initial task.
 **Create and connect** creates the VM, installs T3, registers the project and pairs this client.
 Optional setup failures still let you connect; repair repository access or provider setup there,
 then reconnect to retry. An initial task starts a Codex or Claude thread using the selected model.
-Provider sign-ins must already be available in the snapshot, or you can configure them after connecting.
+Provider sign-ins must already be available on the machine, or you can configure them after connecting.
+Boat can supply sign-ins from **Agents & Proxying** when its Environment enables **Agents credentials**.
 Snapshots carry installed skills and saved sign-ins, so use a clean snapshot when sharing
 setups with others. Agent usage and cloud compute are billed to your accounts.
 

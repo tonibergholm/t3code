@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
-import { CloudMachineError, CloudMachineInput } from "@t3tools/contracts";
+import { AuthStandardClientScopes, CloudMachineError, CloudMachineInput } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -230,7 +230,7 @@ it.live.each(["repository", "project", "task"] as const)(
         const programs = {
           curl: "#!/bin/sh\nexit 0\n",
           git: '#!/bin/sh\n[ "$FAIL_STAGE" != repository ] || exit 128\nfor last; do :; done\nmkdir -p "$last/.git"\n',
-          t3: '#!/bin/sh\nprintf "%s\\n" "$1" >> "$CALLS"\nif [ "$1" = project ] && [ "$FAIL_STAGE" = project ]; then exit 1; fi\nif [ "$1" = thread ] && [ "$FAIL_STAGE" = task ]; then exit 1; fi\nif [ "$1" = pair ]; then echo "Pairing URL: http://localhost:3773/pair#token=TEST"; fi\n',
+          t3: '#!/bin/sh\nprintf "%s\\n" "$1" >> "$CALLS"\nif [ "$1" = project ] && [ "$FAIL_STAGE" = project ]; then exit 1; fi\nif [ "$1" = thread ] && [ "$FAIL_STAGE" = task ]; then exit 1; fi\nif [ "$1" = pair ]; then printf "%s\\n" "$@" > "$PAIR_ARGS"; echo "Pairing URL: http://localhost:3773/pair#token=TEST"; fi\n',
         };
         for (const [name, contents] of Object.entries(programs)) {
           NodeFS.writeFileSync(NodePath.join(bin, name), contents, { mode: 0o755 });
@@ -280,7 +280,7 @@ it("preserves shell metacharacters as literal Boat bootstrap arguments", () => {
   expect(output.split("\0")).toEqual([
     "bash",
     "-lc",
-    CLOUD_BOOTSTRAP,
+    expect.stringContaining(CLOUD_BOOTSTRAP),
     "t3-cloud",
     "bx_23456789",
     "",
@@ -290,3 +290,76 @@ it("preserves shell metacharacters as literal Boat bootstrap arguments", () => {
     "",
   ]);
 });
+
+it.live(
+  "persists Boat agent credentials for the background service and restarts only when they change",
+  () =>
+    Effect.gen(function* () {
+      const environment = yield* HostProcess.Environment;
+      const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-boat-credentials-"));
+      try {
+        const bin = NodePath.join(home, "bin");
+        const state = NodePath.join(home, ".t3-cloud", "bx_23456789");
+        NodeFS.mkdirSync(bin);
+        NodeFS.mkdirSync(state, { recursive: true });
+        NodeFS.writeFileSync(NodePath.join(state, ".installed"), "");
+        NodeFS.writeFileSync(NodePath.join(state, "service.env"), "T3CODE_LAN=true\n");
+        const programs = {
+          bash: `#!/bin/sh\nshift\nexec "${NodeChildProcess.execFileSync("which", ["bash"], { encoding: "utf8" }).trim()}" -c "$@"\n`,
+          curl: "#!/bin/sh\nexit 0\n",
+          t3: '#!/bin/sh\nprintf "%s %s\\n" "$1" "${2:-}" >> "$CALLS"\nif [ "$1" = service ] && [ "${FAIL_RESTART:-}" = 1 ]; then exit 1; fi\nif [ "$1" = pair ]; then printf "%s\\n" "$@" > "$PAIR_ARGS"; echo "Pairing URL: http://localhost:3773/pair#token=TEST"; fi\n',
+        };
+        for (const [name, contents] of Object.entries(programs))
+          NodeFS.writeFileSync(NodePath.join(bin, name), contents, { mode: 0o755 });
+        const calls = NodePath.join(home, "calls");
+        for (const { token, fail } of [
+          { token: "test-oauth-token", fail: false },
+          { token: "test-oauth-token", fail: false },
+          { token: "refreshed-oauth-token", fail: true },
+          { token: "refreshed-oauth-token", fail: false },
+        ]) {
+          const result = NodeChildProcess.spawnSync(
+            "sh",
+            ["-c", boatBootstrapCommand("bx_23456789")],
+            {
+              encoding: "utf8",
+              env: {
+                ...environment,
+                HOME: home,
+                PATH: `${bin}:${environment.PATH ?? ""}`,
+                CALLS: calls,
+                CLAUDE_CODE_OAUTH_TOKEN: token,
+                FAIL_RESTART: fail ? "1" : "0",
+                PAIR_ARGS: NodePath.join(home, "pair-args"),
+              },
+            },
+          );
+          expect(result.status, result.stderr).toBe(fail ? 1 : 0);
+          expect(NodeFS.readFileSync(NodePath.join(state, "service.env"), "utf8")).toContain(
+            fail ? "test-oauth-token" : token,
+          );
+          expect(result.stdout).not.toContain(token);
+          const envFile = NodePath.join(state, "service.env");
+          NodeFS.writeFileSync(
+            envFile,
+            NodeFS.readFileSync(envFile, "utf8").replace(/T3CODE_LAN=[^\n]+/, "T3CODE_LAN=true"),
+          );
+          expect(NodeFS.statSync(NodePath.join(state, "service.env")).mode & 0o777).toBe(0o600);
+        }
+        expect(NodeFS.readFileSync(NodePath.join(state, "service.env"), "utf8")).toContain(
+          "T3CODE_LAN",
+        );
+        expect(NodeFS.readFileSync(calls, "utf8").match(/service restart/g)).toHaveLength(3);
+        expect(
+          NodeFS.readFileSync(NodePath.join(home, "pair-args"), "utf8").trim().split("\n"),
+        ).toEqual([
+          "pair",
+          "--base-dir",
+          state,
+          ...AuthStandardClientScopes.flatMap((scope) => ["--scope", scope]),
+        ]);
+      } finally {
+        NodeFS.rmSync(home, { recursive: true, force: true });
+      }
+    }),
+);

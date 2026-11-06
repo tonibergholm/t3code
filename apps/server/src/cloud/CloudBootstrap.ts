@@ -1,4 +1,4 @@
-import type { CloudMachineInput } from "@t3tools/contracts";
+import { AuthStandardClientScopes, type CloudMachineInput } from "@t3tools/contracts";
 
 // A separate data directory prevents snapshots from duplicating T3's environment identity.
 export const CLOUD_BOOTSTRAP = `set -eu
@@ -43,7 +43,7 @@ if [ -z "$setup_warning" ] && [ -n "$3" ] && [ ! -f "$T3CODE_HOME/.thread-starte
     setup_warning=task
   fi
 fi
-t3 pair --base-dir "$T3CODE_HOME"
+t3 pair --base-dir "$T3CODE_HOME" ${AuthStandardClientScopes.map((scope) => `--scope ${scope}`).join(" ")}
 if [ -n "$setup_warning" ]; then printf 'T3_SETUP_WARNING=%s\\n' "$setup_warning"; fi
 `;
 
@@ -66,7 +66,47 @@ export function boatBootstrapCommand(
   return [
     "bash",
     "-lc",
-    CLOUD_BOOTSTRAP,
+    // Boat injects agent variables into shells; the background service reads service.env instead.
+    `set -eu
+export PATH="$HOME/.local/bin:$PATH"
+export T3CODE_HOME="$HOME/.t3-cloud/$1"
+umask 077
+mkdir -p "$T3CODE_HOME"
+credentials_changed=$(node --input-type=module <<'T3_PROVIDER_ENV'
+import { readFileSync, writeFileSync, existsSync, chmodSync } from 'node:fs';
+import { parseEnv } from 'node:util';
+const file = process.env.T3CODE_HOME + '/service.env';
+const previous = existsSync(file) ? readFileSync(file, 'utf8') : '';
+const entries = parseEnv(previous);
+let changed = false;
+for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'CHATGPT_ACCOUNT_ID']) {
+  const value = process.env[name] || undefined;
+  if (entries[name] !== value) changed = true;
+  if (value === undefined) delete entries[name];
+  else entries[name] = value;
+}
+const next = Object.entries(entries).map(([name, value]) => {
+  const quoted = ["'", String.fromCharCode(96), '"'].map(q => q + value + q)
+    .find(candidate => parseEnv('VALUE=' + candidate).VALUE === value);
+  if (quoted === undefined) throw new Error('Cannot encode service environment');
+  return name + '=' + quoted;
+}).join('\\n') + '\\n';
+if (changed) {
+  writeFileSync(file + '.previous', previous, { mode: 0o600 });
+  if (existsSync(file)) chmodSync(file, 0o600);
+  writeFileSync(file, next, { mode: 0o600 });
+}
+console.log(changed);
+T3_PROVIDER_ENV
+)
+if [ "$credentials_changed" = true ] && [ -f "$T3CODE_HOME/.installed" ]; then
+  if ! t3 service restart >/dev/null; then
+    mv "$T3CODE_HOME/service.env.previous" "$T3CODE_HOME/service.env"
+    exit 1
+  fi
+fi
+rm -f "$T3CODE_HOME/service.env.previous"
+${CLOUD_BOOTSTRAP}`,
     "t3-cloud",
     machineId,
     setup?.repositoryUrl ?? "",
