@@ -1,3 +1,4 @@
+import { CloudMachinesSettings } from "./CloudMachinesSettings";
 import { SessionPermissions } from "./SessionPermissions";
 import { useSearch } from "@tanstack/react-router";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
@@ -1717,6 +1718,20 @@ function ConnectionsSettingsContent({
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      {primaryEnvironmentId && primaryServerConfig?.environment.capabilities.instaboxCloud ? (
+        <CloudMachinesSettings
+          key={`${primaryEnvironmentId}:instabox`}
+          environmentId={primaryEnvironmentId}
+          provider="instabox"
+        />
+      ) : null}
+      {primaryEnvironmentId && primaryServerConfig?.environment.capabilities.boatCloud ? (
+        <CloudMachinesSettings
+          key={`${primaryEnvironmentId}:boat`}
+          environmentId={primaryEnvironmentId}
+          provider="boat"
+        />
+      ) : null}
       {hasCloudPublicConfig() ? (
         <RemoveT3ConnectEnvironmentDialog
           environmentLabel={pendingT3ConnectRemoval?.label ?? null}

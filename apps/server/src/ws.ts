@@ -1,3 +1,5 @@
+import * as Boat from "./cloud/Boat.ts";
+import * as Instabox from "./cloud/Instabox.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
 import * as NodeCrypto from "node:crypto";
@@ -1481,6 +1483,8 @@ export const layerWsRpc = (
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
       const secretRequests = yield* SecretRequests.SecretRequests;
+      const instabox = yield* Instabox.Instabox;
+      const boat = yield* Boat.Boat;
       const guestShares = yield* GuestShareService.GuestShareService;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const issues = yield* IssueService.IssueService;
@@ -2360,6 +2364,8 @@ export const layerWsRpc = (
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
+        [WS_METHODS.instaboxManage]: (input) => instabox.manage(input),
+        [WS_METHODS.boatManage]: (input) => boat.manage(input),
         [WS_METHODS.serverGetConfig]: (_input) =>
           loadServerConfig({
             usageLimitsCommand: false,
@@ -3696,6 +3702,8 @@ export const layer = Layer.unwrap(
                 Layer.succeed(IssueTrackerConnections.IssueTrackerConnections, issueTrackers),
               ),
               Layer.provide(OtlpEndpointCheck.layer),
+              Layer.provide(Instabox.layer),
+              Layer.provide(Boat.layer),
               Layer.provide(
                 Layer.succeed(
                   PullRequestReviewGuideService.PullRequestReviewGuideService,
