@@ -1,3 +1,4 @@
+import { InstaboxSettings } from "./InstaboxSettings";
 import { SessionPermissions } from "./SessionPermissions";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
@@ -1634,6 +1635,9 @@ function ConnectionsSettingsContent({
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      {primaryEnvironmentId && primaryServerConfig?.environment.capabilities.instaboxCloud ? (
+        <InstaboxSettings key={primaryEnvironmentId} environmentId={primaryEnvironmentId} />
+      ) : null}
       {hasCloudPublicConfig() ? (
         <RemoveT3ConnectEnvironmentDialog
           environmentLabel={pendingT3ConnectRemoval?.label ?? null}

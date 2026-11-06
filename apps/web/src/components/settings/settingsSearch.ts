@@ -1257,6 +1257,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["link peer another machine vps agents work there handoff pairing code"],
   },
   {
+    id: "instabox-cloud",
+    title: "Instabox cloud",
+    to: "/settings/connections",
+    searchTerms: ["cloud vm machine snapshot skills provision instabox"],
+  },
+  {
     id: "remote-environments",
     title: "Environments",
     to: "/settings/connections",
