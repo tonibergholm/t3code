@@ -234,6 +234,7 @@ export const make = Effect.gen(function* () {
       storageCleanup: true,
       storageCleanupRun: true,
       instaboxCloud: true,
+      boatCloud: true,
       databaseStorage: true,
       otlpEndpointCheck: true,
       projectWorktreeCleanup: true,

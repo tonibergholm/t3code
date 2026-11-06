@@ -1,4 +1,4 @@
-import { InstaboxInput, InstaboxResult, InstaboxError } from "./instabox.ts";
+import { CloudMachineInput, CloudMachineResult, CloudMachineError } from "./cloudMachines.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -499,6 +499,7 @@ export const WS_METHODS = {
 
   serverProbe: "server.probe",
   instaboxManage: "instabox.manage",
+  boatManage: "boat.manage",
   serverGetConfig: "server.getConfig",
   serverGetNpmRelease: "server.getNpmRelease",
   serverRefreshProviders: "server.refreshProviders",
@@ -635,10 +636,16 @@ const WsServerProbeRpc = Rpc.make(WS_METHODS.serverProbe, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsBoatManageRpc = Rpc.make(WS_METHODS.boatManage, {
+  payload: CloudMachineInput,
+  success: CloudMachineResult,
+  error: Schema.Union([CloudMachineError, EnvironmentAuthorizationError]),
+});
+
 const WsInstaboxManageRpc = Rpc.make(WS_METHODS.instaboxManage, {
-  payload: InstaboxInput,
-  success: InstaboxResult,
-  error: Schema.Union([InstaboxError, EnvironmentAuthorizationError]),
+  payload: CloudMachineInput,
+  success: CloudMachineResult,
+  error: Schema.Union([CloudMachineError, EnvironmentAuthorizationError]),
 });
 
 const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
@@ -2012,6 +2019,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsInstaboxManageRpc,
+  WsBoatManageRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,
   WsProviderConsumeResetCreditRpc,

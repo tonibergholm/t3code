@@ -6,3 +6,8 @@ export const manageInstabox = createEnvironmentRpcCommand(connectionAtomRuntime,
   label: "environment-data:instabox:manage",
   tag: WS_METHODS.instaboxManage,
 });
+
+export const manageBoat = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:boat:manage",
+  tag: WS_METHODS.boatManage,
+});

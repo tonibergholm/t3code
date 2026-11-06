@@ -1,3 +1,4 @@
+import { CLOUD_BOOTSTRAP, boatBootstrapCommand, cloudPairingUrl } from "./CloudBootstrap.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -6,7 +7,7 @@ import * as NodePath from "node:path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
-import { InstaboxError, InstaboxInput } from "@t3tools/contracts";
+import { CloudMachineError, CloudMachineInput } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -16,7 +17,7 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Instabox from "./Instabox.ts";
 
-const isInstaboxError = Schema.is(InstaboxError);
+const isCloudMachineError = Schema.is(CloudMachineError);
 
 function fixture(
   replies: ReadonlyArray<{ readonly status?: number; readonly body: unknown }>,
@@ -151,17 +152,7 @@ it.effect(
       });
       expect(f.calls[1]?.url).toContain("operations/op_test?wait=25s");
       expect(f.calls[3]?.body).toMatchObject({
-        argv: [
-          "bash",
-          "-lc",
-          Instabox.INSTABOX_BOOTSTRAP,
-          "t3-cloud",
-          "m_test",
-          "",
-          "",
-          "codex",
-          "gpt-6-luna",
-        ],
+        argv: ["bash", "-lc", CLOUD_BOOTSTRAP, "t3-cloud", "m_test", "", "", "codex", "gpt-6-luna"],
       });
     }),
 );
@@ -185,7 +176,7 @@ it.effect("refuses to change an existing machine not created by T3", () =>
     const error = yield* service
       .manage({ action: "delete", machineId: "m_test" })
       .pipe(Effect.flip);
-    expect(isInstaboxError(error)).toBe(true);
+    expect(isCloudMachineError(error)).toBe(true);
     expect(f.calls).toHaveLength(1);
   }),
 );
@@ -215,15 +206,12 @@ it.effect("confirms deletion and stops on a failed operation", () =>
 );
 
 it("rejects path injection and malformed pairing output", () => {
-  const decode = Schema.decodeUnknownSync(InstaboxInput);
+  const decode = Schema.decodeUnknownSync(CloudMachineInput);
   expect(() => decode({ action: "delete", machineId: "../../other" })).toThrow();
   expect(() => decode({ action: "create", name: "x", repositoryUrl: "ext::sh -c evil" })).toThrow();
-  expect(() => Instabox.instaboxPairingUrl("no URL", "https://example.test")).toThrow();
+  expect(() => cloudPairingUrl("no URL", "https://example.test")).toThrow();
   expect(() =>
-    Instabox.instaboxPairingUrl(
-      "Pairing URL: http://localhost/pair#token=x",
-      "http://example.test",
-    ),
+    cloudPairingUrl("Pairing URL: http://localhost/pair#token=x", "http://example.test"),
   ).toThrow();
 });
 
@@ -254,7 +242,7 @@ it.live.each(["repository", "project", "task"] as const)(
         ]) {
           const result = NodeChildProcess.spawnSync(
             "bash",
-            ["-c", Instabox.INSTABOX_BOOTSTRAP, "test", "m_test", ...setup],
+            ["-c", CLOUD_BOOTSTRAP, "test", "m_test", ...setup],
             {
               encoding: "utf8",
               env: {
@@ -276,3 +264,29 @@ it.live.each(["repository", "project", "task"] as const)(
       }
     }),
 );
+
+it("preserves shell metacharacters as literal Boat bootstrap arguments", () => {
+  const task = "Handle 'quotes', $(printf injected), `printf injected`, and\nnewlines";
+  const command = boatBootstrapCommand("bx_23456789", {
+    action: "create",
+    name: "test",
+    initialTask: task,
+  });
+  const output = NodeChildProcess.execFileSync(
+    "sh",
+    ["-c", `set -- ${command}; printf '%s\\0' "$@"`],
+    { encoding: "utf8" },
+  );
+  expect(output.split("\0")).toEqual([
+    "bash",
+    "-lc",
+    CLOUD_BOOTSTRAP,
+    "t3-cloud",
+    "bx_23456789",
+    "",
+    task,
+    "codex",
+    "gpt-6-luna",
+    "",
+  ]);
+});

@@ -236,25 +236,28 @@ again on its next connect.
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
-## Instabox cloud environments
+## Cloud environments (Instabox and Boat)
 
-On a host running this fork, open **Settings → Environments → Instabox cloud** and select
-**Manage Instabox**. Connect an Instabox API key with machine read, write and delete, plus
-snapshot read permissions. The key stays in that T3 host's secret store; other clients need
+On a host running this fork, open **Settings → Environments**, choose **Instabox cloud** or
+**Boat cloud**, and select **Manage**. Connect that provider's API key with machine and snapshot
+management permissions. The key stays in that T3 host's secret store; other clients need
 permission to maintain that host to use it.
 
 Choose a machine name and optionally a setup snapshot, repository HTTPS URL and initial task.
 **Create and connect** creates the VM, installs T3, registers the project and pairs this client.
 Optional setup failures still let you connect; repair repository access or provider setup there,
-then reconnect to retry. An initial task starts a Codex or Claude thread using the selected model. Provider sign-ins
-must already be available in the snapshot, or you can configure them after connecting.
+then reconnect to retry. An initial task starts a Codex or Claude thread using the selected model.
+Provider sign-ins must already be available in the snapshot, or you can configure them after connecting.
 Snapshots carry installed skills and saved sign-ins, so use a clean snapshot when sharing
-setups with others. Agent usage and Instabox compute are billed to your accounts.
+setups with others. Agent usage and cloud compute are billed to your accounts.
 
-Use **Pause** to preserve work and **Connect** to resume and pair again. **Delete** permanently
-removes that machine's files and T3 history. T3 only changes machines it created; other account
+Use **Pause** on Instabox to suspend work, or **Stop** on Boat to end processes and save the disk.
+**Connect** resumes the machine and pairs again. Boat auto-stops after one hour by default;
+change the deadline in Boat for longer work. Stopped Boat disks are kept for at least 14 days;
+save a named snapshot in Boat for longer retention. **Delete** permanently removes that machine's
+files and T3 history. T3 only changes machines it created; other account
 machines are listed for reference. Disconnecting the account removes the API key and leaves
-machines running or paused as they were. The native mobile app can pair with a created
+machines in their current state. The native mobile app can pair with a created
 machine through its normal environment connection flow; provisioning controls are currently
 available on web and desktop.
 

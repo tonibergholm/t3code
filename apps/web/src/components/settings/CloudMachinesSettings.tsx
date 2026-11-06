@@ -1,10 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, InstaboxInput, InstaboxResult } from "@t3tools/contracts";
+import type { EnvironmentId, CloudMachineInput, CloudMachineResult } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import * as Redacted from "effect/Redacted";
 import { useState } from "react";
 import { connectPairing } from "../../connection/onboarding";
-import { manageInstabox } from "../../state/instabox";
+import { manageInstabox, manageBoat } from "../../state/cloudMachines";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
@@ -21,30 +21,38 @@ import {
 } from "../ui/alert-dialog";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
-export function InstaboxSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
-  const allowed = useAtomValue(manageInstabox.permissionAtom(environmentId));
-  const manage = useAtomCommand(manageInstabox, { reportFailure: false });
+export function CloudMachinesSettings({
+  environmentId,
+  provider,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly provider: "instabox" | "boat";
+}) {
+  const label = provider === "boat" ? "Boat" : "Instabox";
+  const command = provider === "boat" ? manageBoat : manageInstabox;
+  const allowed = useAtomValue(command.permissionAtom(environmentId));
+  const manage = useAtomCommand(command, { reportFailure: false });
   const pair = useAtomCommand(connectPairing, { reportFailure: false });
-  const [account, setAccount] = useState<InstaboxResult | null>(null);
+  const [account, setAccount] = useState<CloudMachineResult | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [name, setName] = useState("t3-workspace");
   const [snapshotId, setSnapshotId] = useState("");
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [initialTask, setInitialTask] = useState("");
-  const [provider, setProvider] = useState<"codex" | "claudeAgent">("codex");
+  const [agentProvider, setAgentProvider] = useState<"codex" | "claudeAgent">("codex");
   const [model, setModel] = useState("gpt-6-luna");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
 
-  const perform = async (input: InstaboxInput) => {
+  const perform = async (input: CloudMachineInput) => {
     setBusy(true);
     setError(null);
     const result = await manage({ environmentId, input });
     if (result._tag === "Failure") {
       const cause = squashAtomCommandFailure(result);
       setError(
-        cause instanceof Error ? cause.message : "Instabox operation failed. Refresh and retry.",
+        cause instanceof Error ? cause.message : "Cloud operation failed. Refresh and retry.",
       );
       const refreshed = await manage({ environmentId, input: { action: "list" } });
       if (refreshed._tag === "Success") setAccount(refreshed.value);
@@ -53,6 +61,8 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
     }
     setAccount(result.value);
     if (input.action === "configure") setApiKey("");
+    if (result.value.deletionPending)
+      setError("Boat accepted deletion. Stored data is being erased in the background.");
     if (result.value.setupWarning) {
       setError(
         `The machine is ready, but ${result.value.setupWarning} setup failed. Open the environment to repair its setup, then connect again to retry.`,
@@ -73,10 +83,10 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
   };
 
   return (
-    <SettingsSection title="Instabox cloud" id="instabox-cloud">
+    <SettingsSection title={`${label} cloud`} id={`${provider}-cloud`}>
       <SettingsRow
         title="Cloud environments"
-        description="Create a Linux machine with your snapshot's tools and skills. Your Instabox account pays for compute."
+        description={`Create a Linux machine with your snapshot's tools and skills. Your ${label} account pays for compute.`}
         control={
           <Button
             variant="outline"
@@ -84,7 +94,7 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
             disabled={!allowed || busy}
             onClick={() => void perform({ action: "list" })}
           >
-            {busy ? "Working…" : account ? "Refresh" : "Manage Instabox"}
+            {busy ? "Working…" : account ? "Refresh" : `Manage ${label}`}
           </Button>
         }
       />
@@ -102,11 +112,11 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
           }}
         >
           <div className="min-w-48 flex-1">
-            <label htmlFor="instabox-api-key" className="text-sm">
-              Instabox API key
+            <label htmlFor={`${provider}-api-key`} className="text-sm">
+              {label} API key
             </label>
             <Input
-              id="instabox-api-key"
+              id={`${provider}-api-key`}
               type="password"
               autoComplete="off"
               value={apiKey}
@@ -118,10 +128,16 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
             Connect account
           </Button>
           <p className="w-full text-xs text-muted-foreground">
-            Stored in this T3 host's secret store. Requires machine read/write/delete and snapshot
-            read permissions.
+            Stored in this T3 host's secret store. Requires machine and snapshot management
+            permissions.
           </p>
         </form>
+      ) : null}
+      {provider === "boat" ? (
+        <p className="px-4 text-xs text-muted-foreground">
+          Stopping ends running processes. Disk snapshots are retained for at least 14 days; resume
+          restarts T3. Boat auto-stops machines after one hour by default.
+        </p>
       ) : null}
       {account?.configured ? (
         <div className="space-y-4 p-4">
@@ -134,16 +150,18 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
                 name,
                 ...(snapshotId ? { snapshotId } : {}),
                 ...(repositoryUrl.trim() ? { repositoryUrl: repositoryUrl.trim() } : {}),
-                ...(initialTask.trim() ? { initialTask: initialTask.trim(), provider, model } : {}),
+                ...(initialTask.trim()
+                  ? { initialTask: initialTask.trim(), provider: agentProvider, model }
+                  : {}),
               });
             }}
           >
             <div className="min-w-40 flex-1">
-              <label htmlFor="instabox-name" className="text-sm">
+              <label htmlFor={`${provider}-name`} className="text-sm">
                 Machine name
               </label>
               <Input
-                id="instabox-name"
+                id={`${provider}-name`}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 pattern="[a-zA-Z0-9][a-zA-Z0-9-]{0,62}"
@@ -151,11 +169,11 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
               />
             </div>
             <div className="min-w-48 flex-1">
-              <label className="text-sm" htmlFor="instabox-snapshot">
+              <label className="text-sm" htmlFor={`${provider}-snapshot`}>
                 Setup snapshot
               </label>
               <Select value={snapshotId} onValueChange={(value) => setSnapshotId(value ?? "")}>
-                <SelectTrigger id="instabox-snapshot" aria-label="Setup snapshot">
+                <SelectTrigger id={`${provider}-snapshot`} aria-label="Setup snapshot">
                   <SelectValue>
                     {account.snapshots.find((snapshot) => snapshot.id === snapshotId)?.name ??
                       "Clean Linux machine"}
@@ -172,11 +190,11 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
               </Select>
             </div>
             <div className="w-full">
-              <label htmlFor="instabox-repository" className="text-sm">
+              <label htmlFor={`${provider}-repository`} className="text-sm">
                 Repository HTTPS URL (optional)
               </label>
               <Input
-                id="instabox-repository"
+                id={`${provider}-repository`}
                 type="url"
                 placeholder="https://github.com/owner/repository.git"
                 value={repositoryUrl}
@@ -184,11 +202,11 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
               />
             </div>
             <div className="w-full">
-              <label htmlFor="instabox-task" className="text-sm">
+              <label htmlFor={`${provider}-task`} className="text-sm">
                 Initial task (optional)
               </label>
               <Input
-                id="instabox-task"
+                id={`${provider}-task`}
                 value={initialTask}
                 maxLength={16000}
                 onChange={(event) => setInitialTask(event.target.value)}
@@ -197,15 +215,15 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
             {initialTask.trim() ? (
               <>
                 <Select
-                  value={provider}
+                  value={agentProvider}
                   onValueChange={(value) => {
                     if (value !== "codex" && value !== "claudeAgent") return;
-                    setProvider(value);
+                    setAgentProvider(value);
                     setModel(value === "codex" ? "gpt-6-luna" : "claude-haiku-4-5");
                   }}
                 >
                   <SelectTrigger aria-label="Initial task provider">
-                    <SelectValue>{provider === "codex" ? "Codex" : "Claude"}</SelectValue>
+                    <SelectValue>{agentProvider === "codex" ? "Codex" : "Claude"}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
                     <SelectItem value="codex">Codex</SelectItem>
@@ -213,11 +231,11 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
                   </SelectPopup>
                 </Select>
                 <div className="min-w-40 flex-1">
-                  <label htmlFor="instabox-model" className="text-sm">
+                  <label htmlFor={`${provider}-model`} className="text-sm">
                     Model
                   </label>
                   <Input
-                    id="instabox-model"
+                    id={`${provider}-model`}
                     value={model}
                     required
                     onChange={(event) => setModel(event.target.value)}
@@ -257,9 +275,14 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
                         size="sm"
                         variant="outline"
                         disabled={busy || !allowed}
-                        onClick={() => void perform({ action: "pause", machineId: machine.id })}
+                        onClick={() =>
+                          void perform({
+                            action: provider === "boat" ? "stop" : "pause",
+                            machineId: machine.id,
+                          })
+                        }
                       >
-                        Pause
+                        {provider === "boat" ? "Stop" : "Pause"}
                       </Button>
                     ) : null}
                     <Button

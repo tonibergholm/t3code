@@ -1,10 +1,11 @@
+import { CLOUD_BOOTSTRAP, cloudPairingUrl } from "./CloudBootstrap.ts";
 import {
-  InstaboxError,
-  InstaboxMachine,
-  InstaboxSnapshot,
-  InstaboxSetupWarning,
-  type InstaboxInput,
-  type InstaboxResult,
+  CloudMachineError,
+  CloudMachine,
+  CloudSnapshot,
+  CloudSetupWarning,
+  type CloudMachineInput,
+  type CloudMachineResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -16,7 +17,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
-const isInstaboxError = Schema.is(InstaboxError);
+const isCloudMachineError = Schema.is(CloudMachineError);
 
 const KEY = "instabox-api-key";
 const Operation = Schema.Struct({
@@ -25,73 +26,18 @@ const Operation = Schema.Struct({
   machineId: Schema.optionalKey(Schema.String),
 });
 const MachinePage = Schema.Struct({
-  machines: Schema.Array(InstaboxMachine),
+  machines: Schema.Array(CloudMachine),
   nextCursor: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 const Execution = Schema.Struct({ stdout: Schema.String, exitCode: Schema.Number });
 
-// A separate data directory prevents snapshots from duplicating T3's environment identity.
-export const INSTABOX_BOOTSTRAP = `set -eu
-export PATH="$HOME/.local/bin:$PATH"
-export GIT_TERMINAL_PROMPT=0
-export T3CODE_HOME="$HOME/.t3-cloud/$1"
-umask 077
-mkdir -p "$T3CODE_HOME/workspace"
-if [ ! -f "$T3CODE_HOME/setup" ]; then
-  printf '%s\\0' "$2" "$3" "$4" "$5" > "$T3CODE_HOME/setup"
-fi
-mapfile -d '' -t setup < "$T3CODE_HOME/setup"
-set -- "$1" "\${setup[0]}" "\${setup[1]}" "\${setup[2]}" "\${setup[3]}"
-if [ ! -f "$T3CODE_HOME/.installed" ]; then
-  curl -fsSL https://t3.codes/install.sh -o /tmp/t3-cloud-install.sh
-  sh /tmp/t3-cloud-install.sh
-  touch "$T3CODE_HOME/.installed"
-fi
-setup_warning=
-if [ -n "$2" ] && [ ! -d "$T3CODE_HOME/repository/.git" ]; then
-  if ! git clone -- "$2" "$T3CODE_HOME/repository"; then setup_warning=repository; fi
-fi
-if [ -d "$T3CODE_HOME/repository/.git" ]; then
-  cd "$T3CODE_HOME/repository"
-else
-  cd "$T3CODE_HOME/workspace"
-fi
-t3 up --lan --no-connect --yes --headless >/dev/null
-curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 1 \
-  http://127.0.0.1:3773/.well-known/t3/environment >/dev/null
-if [ -z "$setup_warning" ] && [ ! -f "$T3CODE_HOME/.project-added" ]; then
-  if t3 project add "$PWD" >/dev/null; then
-    touch "$T3CODE_HOME/.project-added"
-  else
-    setup_warning=project
-  fi
-fi
-if [ -z "$setup_warning" ] && [ -n "$3" ] && [ ! -f "$T3CODE_HOME/.thread-started" ]; then
-  if t3 thread start --provider "$4" --model "$5" -- "$PWD" "$3" >/dev/null; then
-    touch "$T3CODE_HOME/.thread-started"
-  else
-    setup_warning=task
-  fi
-fi
-t3 pair --base-dir "$T3CODE_HOME"
-if [ -n "$setup_warning" ]; then printf 'T3_SETUP_WARNING=%s\\n' "$setup_warning"; fi
-`;
-
-export function instaboxPairingUrl(output: string, endpoint: string): string {
-  const match = /^Pairing URL: (https?:\/\/\S+)$/m.exec(output);
-  if (!match?.[1]) throw new Error("Missing T3 pairing URL");
-  const pairing = new URL(match[1]);
-  const target = new URL(endpoint);
-  if (target.protocol !== "https:") throw new Error("Invalid Instabox endpoint");
-  target.pathname = pairing.pathname;
-  target.search = pairing.search;
-  target.hash = pairing.hash;
-  return target.toString();
-}
-
 export class Instabox extends Context.Service<
   Instabox,
-  { readonly manage: (input: InstaboxInput) => Effect.Effect<InstaboxResult, InstaboxError> }
+  {
+    readonly manage: (
+      input: CloudMachineInput,
+    ) => Effect.Effect<CloudMachineResult, CloudMachineError>;
+  }
 >()("t3/cloud/Instabox") {}
 
 const make = Effect.gen(function* () {
@@ -119,13 +65,15 @@ const make = Effect.gen(function* () {
       if (body !== undefined) req = yield* HttpClientRequest.bodyJson(req, body);
       const response = yield* http.execute(req);
       if (response.status < 200 || response.status >= 300) {
-        return yield* new InstaboxError({ operation: "request", status: response.status });
+        return yield* new CloudMachineError({ operation: "request", status: response.status });
       }
       return yield* HttpClientResponse.schemaBodyJson(schema)(response);
     },
     Effect.timeout("3 minutes"),
     Effect.mapError((error) =>
-      isInstaboxError(error) ? error : new InstaboxError({ operation: "request", cause: error }),
+      isCloudMachineError(error)
+        ? error
+        : new CloudMachineError({ operation: "request", cause: error }),
     ),
   );
 
@@ -137,11 +85,13 @@ const make = Effect.gen(function* () {
     for (let attempt = 0; attempt < 24; attempt++) {
       if (current.state === "succeeded") return;
       if (current.state === "failed" || current.state === "cancelled") {
-        return yield* new InstaboxError({ operation: "machine operation" });
+        return yield* new CloudMachineError({ operation: "machine operation" });
       }
       current = yield* request(key, `operations/${operation.id}?wait=25s`, Operation);
     }
-    return yield* new InstaboxError({ operation: "operation timed out; refresh machine status" });
+    return yield* new CloudMachineError({
+      operation: "operation timed out; refresh machine status",
+    });
   });
 
   const list = Effect.fn("Instabox.list")(function* (key: string) {
@@ -158,7 +108,7 @@ const make = Effect.gen(function* () {
     const snapshots = yield* request(
       key,
       "snapshots",
-      Schema.Struct({ snapshots: Schema.Array(InstaboxSnapshot) }),
+      Schema.Struct({ snapshots: Schema.Array(CloudSnapshot) }),
     );
     return { configured: true, machines, snapshots: snapshots.snapshots };
   });
@@ -166,14 +116,14 @@ const make = Effect.gen(function* () {
   const connect = Effect.fn("Instabox.connect")(function* (
     key: string,
     machineId: string,
-    setup?: Extract<InstaboxInput, { action: "create" }>,
+    setup?: Extract<CloudMachineInput, { action: "create" }>,
   ) {
     yield* wait(key, yield* request(key, `machines/${machineId}/start`, Operation, {}));
     const execution = yield* request(key, `machines/${machineId}/exec`, Execution, {
       argv: [
         "bash",
         "-lc",
-        INSTABOX_BOOTSTRAP,
+        CLOUD_BOOTSTRAP,
         "t3-cloud",
         machineId,
         setup?.repositoryUrl ?? "",
@@ -183,7 +133,8 @@ const make = Effect.gen(function* () {
       ],
       timeoutSeconds: 120,
     });
-    if (execution.exitCode !== 0) return yield* new InstaboxError({ operation: "T3 bootstrap" });
+    if (execution.exitCode !== 0)
+      return yield* new CloudMachineError({ operation: "T3 bootstrap" });
     const port = yield* request(
       key,
       `machines/${machineId}/ports`,
@@ -195,18 +146,20 @@ const make = Effect.gen(function* () {
       },
     );
     const pairingUrl = yield* Effect.try({
-      try: () => instaboxPairingUrl(execution.stdout, port.url),
-      catch: (cause) => new InstaboxError({ operation: "pairing", cause }),
+      try: () => cloudPairingUrl(execution.stdout, port.url),
+      catch: (cause) => new CloudMachineError({ operation: "pairing", cause }),
     });
     const outputLines = execution.stdout.split("\n");
-    const setupWarning = InstaboxSetupWarning.literals.find((warning) =>
+    const setupWarning = CloudSetupWarning.literals.find((warning) =>
       outputLines.includes(`T3_SETUP_WARNING=${warning}`),
     );
     return { pairingUrl, ...(setupWarning ? { setupWarning } : {}) };
   });
 
   const manage = Effect.fn("Instabox.manage")(
-    function* (input: InstaboxInput) {
+    function* (input: CloudMachineInput) {
+      if (input.action === "stop")
+        return yield* new CloudMachineError({ operation: "Instabox does not support this action" });
       if (input.action === "disconnect") {
         yield* secrets.remove(KEY);
         return { configured: false, machines: [], snapshots: [] };
@@ -220,11 +173,11 @@ const make = Effect.gen(function* () {
       const stored = yield* secrets.get(KEY);
       if (Option.isNone(stored)) {
         if (input.action === "list") return { configured: false, machines: [], snapshots: [] };
-        return yield* new InstaboxError({ operation: "account not connected" });
+        return yield* new CloudMachineError({ operation: "account not connected" });
       }
       const key = new TextDecoder().decode(stored.value);
       if (input.action === "list") return yield* list(key);
-      let connection: Pick<InstaboxResult, "pairingUrl" | "setupWarning"> = {};
+      let connection: Pick<CloudMachineResult, "pairingUrl" | "setupWarning"> = {};
       if (input.action === "create") {
         const operation = yield* request(key, "machines", Operation, {
           name: input.name,
@@ -235,12 +188,12 @@ const make = Effect.gen(function* () {
           metadata: { app: "t3code" },
         });
         yield* wait(key, operation);
-        if (!operation.machineId) return yield* new InstaboxError({ operation: "create" });
+        if (!operation.machineId) return yield* new CloudMachineError({ operation: "create" });
         connection = yield* connect(key, operation.machineId, input);
       } else {
-        const machine = yield* request(key, `machines/${input.machineId}`, InstaboxMachine);
+        const machine = yield* request(key, `machines/${input.machineId}`, CloudMachine);
         if (machine.metadata?.app !== "t3code") {
-          return yield* new InstaboxError({ operation: "machine is not managed by T3" });
+          return yield* new CloudMachineError({ operation: "machine is not managed by T3" });
         }
         if (input.action === "connect") connection = yield* connect(key, input.machineId);
         else {
@@ -262,9 +215,9 @@ const make = Effect.gen(function* () {
       return { ...(yield* list(key)), ...connection };
     },
     Effect.mapError((error) =>
-      isInstaboxError(error)
+      isCloudMachineError(error)
         ? error
-        : new InstaboxError({ operation: "account storage", cause: error }),
+        : new CloudMachineError({ operation: "account storage", cause: error }),
     ),
   );
 

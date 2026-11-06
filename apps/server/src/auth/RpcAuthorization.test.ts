@@ -36,6 +36,8 @@ describe("RPC authorization scopes", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
     expect(requiredScopeForRpcMethod(WS_METHODS.instaboxManage)).toBe(AuthEnvironmentMaintainScope);
     expect(CLIENT_GUARDED_RPC_SCOPES[WS_METHODS.instaboxManage]).toBe(AuthEnvironmentMaintainScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.boatManage)).toBe(AuthEnvironmentMaintainScope);
+    expect(CLIENT_GUARDED_RPC_SCOPES[WS_METHODS.boatManage]).toBe(AuthEnvironmentMaintainScope);
   });
 
   it("keeps webhook delivery logs, which hold request bodies, behind operate scope", () => {
