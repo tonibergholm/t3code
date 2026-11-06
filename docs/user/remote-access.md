@@ -245,7 +245,8 @@ permission to maintain that host to use it.
 
 Choose a machine name and optionally a setup snapshot, repository HTTPS URL and initial task.
 **Create and connect** creates the VM, installs T3, registers the project and pairs this client.
-An initial task starts a Codex or Claude thread using the selected model. Provider sign-ins
+Optional setup failures still let you connect; repair repository access or provider setup there,
+then reconnect to retry. An initial task starts a Codex or Claude thread using the selected model. Provider sign-ins
 must already be available in the snapshot, or you can configure them after connecting.
 Snapshots carry installed skills and saved sign-ins, so use a clean snapshot when sharing
 setups with others. Agent usage and Instabox compute are billed to your accounts.

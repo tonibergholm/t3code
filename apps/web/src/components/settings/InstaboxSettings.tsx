@@ -53,6 +53,11 @@ export function InstaboxSettings({ environmentId }: { readonly environmentId: En
     }
     setAccount(result.value);
     if (input.action === "configure") setApiKey("");
+    if (result.value.setupWarning) {
+      setError(
+        `The machine is ready, but ${result.value.setupWarning} setup failed. Open the environment to repair its setup, then connect again to retry.`,
+      );
+    }
     if (result.value.pairingUrl) {
       const connected = await pair({ pairingUrl: result.value.pairingUrl });
       if (connected._tag === "Failure") {

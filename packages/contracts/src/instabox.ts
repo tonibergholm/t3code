@@ -37,11 +37,13 @@ export const InstaboxMachine = Schema.Struct({
   metadata: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 });
 export const InstaboxSnapshot = Schema.Struct({ id: SnapshotId, name: Schema.String });
+export const InstaboxSetupWarning = Schema.Literals(["repository", "project", "task"]);
 export const InstaboxResult = Schema.Struct({
   configured: Schema.Boolean,
   machines: Schema.Array(InstaboxMachine),
   snapshots: Schema.Array(InstaboxSnapshot),
   pairingUrl: Schema.optionalKey(Schema.String),
+  setupWarning: Schema.optionalKey(InstaboxSetupWarning),
 });
 export type InstaboxResult = typeof InstaboxResult.Type;
 

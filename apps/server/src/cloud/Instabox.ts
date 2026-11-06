@@ -2,6 +2,7 @@ import {
   InstaboxError,
   InstaboxMachine,
   InstaboxSnapshot,
+  InstaboxSetupWarning,
   type InstaboxInput,
   type InstaboxResult,
 } from "@t3tools/contracts";
@@ -32,6 +33,7 @@ const Execution = Schema.Struct({ stdout: Schema.String, exitCode: Schema.Number
 // A separate data directory prevents snapshots from duplicating T3's environment identity.
 export const INSTABOX_BOOTSTRAP = `set -eu
 export PATH="$HOME/.local/bin:$PATH"
+export GIT_TERMINAL_PROMPT=0
 export T3CODE_HOME="$HOME/.t3-cloud/$1"
 umask 077
 mkdir -p "$T3CODE_HOME/workspace"
@@ -45,8 +47,9 @@ if [ ! -f "$T3CODE_HOME/.installed" ]; then
   sh /tmp/t3-cloud-install.sh
   touch "$T3CODE_HOME/.installed"
 fi
+setup_warning=
 if [ -n "$2" ] && [ ! -d "$T3CODE_HOME/repository/.git" ]; then
-  git clone -- "$2" "$T3CODE_HOME/repository"
+  if ! git clone -- "$2" "$T3CODE_HOME/repository"; then setup_warning=repository; fi
 fi
 if [ -d "$T3CODE_HOME/repository/.git" ]; then
   cd "$T3CODE_HOME/repository"
@@ -56,15 +59,22 @@ fi
 t3 up --lan --no-connect --yes --headless >/dev/null
 curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 1 \
   http://127.0.0.1:3773/.well-known/t3/environment >/dev/null
-if [ ! -f "$T3CODE_HOME/.project-added" ]; then
-  t3 project add "$PWD" >/dev/null
-  touch "$T3CODE_HOME/.project-added"
+if [ -z "$setup_warning" ] && [ ! -f "$T3CODE_HOME/.project-added" ]; then
+  if t3 project add "$PWD" >/dev/null; then
+    touch "$T3CODE_HOME/.project-added"
+  else
+    setup_warning=project
+  fi
 fi
-if [ -n "$3" ] && [ ! -f "$T3CODE_HOME/.thread-started" ]; then
-  t3 thread start --provider "$4" --model "$5" -- "$PWD" "$3" >/dev/null
-  touch "$T3CODE_HOME/.thread-started"
+if [ -z "$setup_warning" ] && [ -n "$3" ] && [ ! -f "$T3CODE_HOME/.thread-started" ]; then
+  if t3 thread start --provider "$4" --model "$5" -- "$PWD" "$3" >/dev/null; then
+    touch "$T3CODE_HOME/.thread-started"
+  else
+    setup_warning=task
+  fi
 fi
 t3 pair --base-dir "$T3CODE_HOME"
+if [ -n "$setup_warning" ]; then printf 'T3_SETUP_WARNING=%s\\n' "$setup_warning"; fi
 `;
 
 export function instaboxPairingUrl(output: string, endpoint: string): string {
@@ -184,10 +194,15 @@ const make = Effect.gen(function* () {
         name: "T3 Code",
       },
     );
-    return yield* Effect.try({
+    const pairingUrl = yield* Effect.try({
       try: () => instaboxPairingUrl(execution.stdout, port.url),
       catch: (cause) => new InstaboxError({ operation: "pairing", cause }),
     });
+    const outputLines = execution.stdout.split("\n");
+    const setupWarning = InstaboxSetupWarning.literals.find((warning) =>
+      outputLines.includes(`T3_SETUP_WARNING=${warning}`),
+    );
+    return { pairingUrl, ...(setupWarning ? { setupWarning } : {}) };
   });
 
   const manage = Effect.fn("Instabox.manage")(
@@ -209,7 +224,7 @@ const make = Effect.gen(function* () {
       }
       const key = new TextDecoder().decode(stored.value);
       if (input.action === "list") return yield* list(key);
-      let pairingUrl: string | undefined;
+      let connection: Pick<InstaboxResult, "pairingUrl" | "setupWarning"> = {};
       if (input.action === "create") {
         const operation = yield* request(key, "machines", Operation, {
           name: input.name,
@@ -221,13 +236,13 @@ const make = Effect.gen(function* () {
         });
         yield* wait(key, operation);
         if (!operation.machineId) return yield* new InstaboxError({ operation: "create" });
-        pairingUrl = yield* connect(key, operation.machineId, input);
+        connection = yield* connect(key, operation.machineId, input);
       } else {
         const machine = yield* request(key, `machines/${input.machineId}`, InstaboxMachine);
         if (machine.metadata?.app !== "t3code") {
           return yield* new InstaboxError({ operation: "machine is not managed by T3" });
         }
-        if (input.action === "connect") pairingUrl = yield* connect(key, input.machineId);
+        if (input.action === "connect") connection = yield* connect(key, input.machineId);
         else {
           const path =
             input.action === "delete"
@@ -244,7 +259,7 @@ const make = Effect.gen(function* () {
           yield* wait(key, operation);
         }
       }
-      return { ...(yield* list(key)), ...(pairingUrl ? { pairingUrl } : {}) };
+      return { ...(yield* list(key)), ...connection };
     },
     Effect.mapError((error) =>
       isInstaboxError(error)

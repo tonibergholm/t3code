@@ -1,3 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
 import { InstaboxError, InstaboxInput } from "@t3tools/contracts";
@@ -117,7 +123,11 @@ it.effect(
           { body: { ...op, state: "succeeded" } },
           { body: { ...op, state: "succeeded" } },
           {
-            body: { exitCode: 0, stdout: "Pairing URL: http://172.16.0.2:3773/pair#token=TEST\n" },
+            body: {
+              exitCode: 0,
+              stdout:
+                "Pairing URL: http://172.16.0.2:3773/pair#token=TEST\nT3_SETUP_WARNING=repository\n",
+            },
           },
           { body: { url: "https://3773-test.instabox.tech" } },
           { body: { machines: [] } },
@@ -132,6 +142,7 @@ it.effect(
         snapshotId: "sn_test",
       });
       expect(result.pairingUrl).toBe("https://3773-test.instabox.tech/pair#token=TEST");
+      expect(result.setupWarning).toBe("repository");
       expect(f.calls[0]?.body).toEqual({
         name: "test",
         snapshotId: "sn_test",
@@ -215,3 +226,53 @@ it("rejects path injection and malformed pairing output", () => {
     ),
   ).toThrow();
 });
+
+it.live.each(["repository", "project", "task"] as const)(
+  "keeps pairing available when optional %s setup fails, including on reconnect",
+  (stage) =>
+    Effect.gen(function* () {
+      const environment = yield* HostProcess.Environment;
+      const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-instabox-bootstrap-"));
+      try {
+        const bin = NodePath.join(home, "bin");
+        const state = NodePath.join(home, ".t3-cloud", "m_test");
+        NodeFS.mkdirSync(bin);
+        NodeFS.mkdirSync(state, { recursive: true });
+        NodeFS.writeFileSync(NodePath.join(state, ".installed"), "");
+        const programs = {
+          curl: "#!/bin/sh\nexit 0\n",
+          git: '#!/bin/sh\n[ "$FAIL_STAGE" != repository ] || exit 128\nfor last; do :; done\nmkdir -p "$last/.git"\n',
+          t3: '#!/bin/sh\nprintf "%s\\n" "$1" >> "$CALLS"\nif [ "$1" = project ] && [ "$FAIL_STAGE" = project ]; then exit 1; fi\nif [ "$1" = thread ] && [ "$FAIL_STAGE" = task ]; then exit 1; fi\nif [ "$1" = pair ]; then echo "Pairing URL: http://localhost:3773/pair#token=TEST"; fi\n',
+        };
+        for (const [name, contents] of Object.entries(programs)) {
+          NodeFS.writeFileSync(NodePath.join(bin, name), contents, { mode: 0o755 });
+        }
+        const calls = NodePath.join(home, "calls");
+        for (const setup of [
+          ["https://example.test/repository.git", "initial task", "codex", "model"],
+          ["", "", "codex", "model"],
+        ]) {
+          const result = NodeChildProcess.spawnSync(
+            "bash",
+            ["-c", Instabox.INSTABOX_BOOTSTRAP, "test", "m_test", ...setup],
+            {
+              encoding: "utf8",
+              env: {
+                ...environment,
+                HOME: home,
+                PATH: `${bin}:${environment.PATH ?? ""}`,
+                FAIL_STAGE: stage,
+                CALLS: calls,
+              },
+            },
+          );
+          expect(result.status, result.stderr).toBe(0);
+          expect(result.stdout).toContain("Pairing URL:");
+          expect(result.stdout).toContain(`T3_SETUP_WARNING=${stage}`);
+        }
+        if (stage !== "task") expect(NodeFS.readFileSync(calls, "utf8")).not.toContain("thread");
+      } finally {
+        NodeFS.rmSync(home, { recursive: true, force: true });
+      }
+    }),
+);
