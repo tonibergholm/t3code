@@ -1,3 +1,4 @@
+import { CloudMachinesSettings } from "./CloudMachinesSettings";
 import { SessionPermissions } from "./SessionPermissions";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
@@ -1634,6 +1635,20 @@ function ConnectionsSettingsContent({
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      {primaryEnvironmentId && primaryServerConfig?.environment.capabilities.instaboxCloud ? (
+        <CloudMachinesSettings
+          key={`${primaryEnvironmentId}:instabox`}
+          environmentId={primaryEnvironmentId}
+          provider="instabox"
+        />
+      ) : null}
+      {primaryEnvironmentId && primaryServerConfig?.environment.capabilities.boatCloud ? (
+        <CloudMachinesSettings
+          key={`${primaryEnvironmentId}:boat`}
+          environmentId={primaryEnvironmentId}
+          provider="boat"
+        />
+      ) : null}
       {hasCloudPublicConfig() ? (
         <RemoveT3ConnectEnvironmentDialog
           environmentLabel={pendingT3ConnectRemoval?.label ?? null}

@@ -7,6 +7,8 @@ import type { RpcSession } from "../rpc/session.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
+  AuthStandardClientScopes,
+  AuthEnvironmentMaintainScope,
   AuthAccessReadScope,
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
@@ -67,6 +69,47 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect.each([WS_METHODS.instaboxManage, WS_METHODS.boatManage])(
+    "keeps %s pairing controls unavailable until every delegated grant is present",
+    (method) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* setup;
+          const cloud = createCommandPermissions(runtime, method);
+          const create = { action: "create", name: "test" };
+          registry.set(
+            sessions(env),
+            AsyncResult.success({
+              ...grant(false),
+              scopes: [AuthEnvironmentMaintainScope],
+              permissions: [AuthEnvironmentMaintainScope],
+            }),
+          );
+          expect(registry.get(cloud.permissionAtom(env, { action: "list" }))).toBe(true);
+          expect(registry.get(cloud.permissionAtom(env, create))).toBe(false);
+          expect(registry.get(cloud.permissionAtom(env, { action: "disconnect" }))).toBe(false);
+          const restricted = AuthStandardClientScopes.filter(
+            (scope) => scope !== AuthAccessWriteScope,
+          );
+          registry.set(
+            sessions(env),
+            AsyncResult.success({ ...grant(false), scopes: restricted, permissions: restricted }),
+          );
+          expect(registry.get(cloud.permissionAtom(env, create))).toBe(false);
+          registry.set(
+            sessions(env),
+            AsyncResult.success({
+              ...grant(false),
+              scopes: [...AuthStandardClientScopes],
+              permissions: [...AuthStandardClientScopes],
+            }),
+          );
+          expect(registry.get(cloud.permissionAtom(env, create))).toBe(true);
+          expect(registry.get(cloud.permissionAtom(env, { action: "disconnect" }))).toBe(true);
+        }),
+      ),
+  );
+
   it.effect("requires the destination read grant to refresh providers", () =>
     Effect.scoped(
       Effect.gen(function* () {

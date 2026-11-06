@@ -1,6 +1,8 @@
 import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput, GitRunStackedActionInput } from "./git.ts";
 import {
+  AuthStandardClientScopes,
+  AuthEnvironmentMaintainScope,
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -12,9 +14,12 @@ import {
 } from "./auth.ts";
 import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 import { WS_METHODS } from "./rpc.ts";
+import { CloudMachineInput } from "./cloudMachines.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  [WS_METHODS.instaboxManage]: AuthEnvironmentMaintainScope,
+  [WS_METHODS.boatManage]: AuthEnvironmentMaintainScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.
   [WS_METHODS.previewStopLocalServer]: AuthTerminalOperateScope,
@@ -73,6 +78,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 
+const decodeCloudMachine = Schema.decodeUnknownSync(Schema.toType(CloudMachineInput));
 const decodePrepareThread = Schema.decodeUnknownSync(GitPreparePullRequestThreadInput);
 const decodeStackedAction = Schema.decodeUnknownSync(GitRunStackedActionInput);
 
@@ -80,6 +86,17 @@ export function clientRpcRequiredScopes(
   method: string,
   input: unknown,
 ): readonly AuthEnvironmentScope[] {
+  if (
+    (method === WS_METHODS.instaboxManage || method === WS_METHODS.boatManage) &&
+    input !== undefined
+  ) {
+    const payload = decodeCloudMachine(input);
+    // Pairing delegates the pinned standard client grant on the new environment.
+    if (payload.action === "create" || payload.action === "connect")
+      return AuthStandardClientScopes;
+    if (payload.action === "configure" || payload.action === "disconnect")
+      return [AuthEnvironmentMaintainScope, AuthSettingsWriteScope];
+  }
   if (method === WS_METHODS.gitPreparePullRequestThread && input !== undefined) {
     const payload = decodePrepareThread(input);
     if (payload.mode === "worktree" && payload.threadId !== undefined)

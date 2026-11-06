@@ -236,6 +236,34 @@ again on its next connect.
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
+## Cloud environments (Instabox and Boat)
+
+On a host running this fork, open **Settings → Environments**, choose **Instabox cloud** or
+**Boat cloud**, and select **Manage**. Connect that provider's API key with machine and snapshot
+management permissions. The key stays in that T3 host's secret store; other clients need
+permission to maintain that host to list or stop machines. Account changes also require settings
+permission. Creating or connecting requires full client access because pairing grants that access
+to the new environment.
+
+Choose a machine name and optionally a setup snapshot, repository HTTPS URL and initial task.
+**Create and connect** creates the VM, installs T3, registers the project and pairs this client.
+Optional setup failures still let you connect; repair repository access or provider setup there,
+then reconnect to retry. An initial task starts a Codex or Claude thread using the selected model.
+Provider sign-ins must already be available on the machine, or you can configure them after connecting.
+Boat can supply sign-ins from **Agents & Proxying** when its Environment enables **Agents credentials**.
+Snapshots carry installed skills and saved sign-ins, so use a clean snapshot when sharing
+setups with others. Agent usage and cloud compute are billed to your accounts.
+
+Use **Pause** on Instabox to suspend work, or **Stop** on Boat to end processes and save the disk.
+**Connect** resumes the machine and pairs again. Boat auto-stops after one hour by default;
+change the deadline in Boat for longer work. Stopped Boat disks are kept for at least 14 days;
+save a named snapshot in Boat for longer retention. **Delete** permanently removes that machine's
+files and T3 history. T3 only changes machines it created; other account
+machines are listed for reference. Disconnecting the account removes the API key and leaves
+machines in their current state. The native mobile app can pair with a created
+machine through its normal environment connection flow; provisioning controls are currently
+available on web and desktop.
+
 ## Browser on a remote environment
 
 Browser tabs belong to the environment, so you and your agents see the same

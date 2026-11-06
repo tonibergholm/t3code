@@ -1,5 +1,8 @@
 import {
+  AuthStandardClientScopes,
+  AuthAccessWriteScope,
   AuthEnvironmentMaintainScope,
+  CLIENT_GUARDED_RPC_SCOPES,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
   AuthProvidersManageScope,
@@ -20,6 +23,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Stream from "effect/Stream";
 import * as RpcTest from "effect/rpc/RpcTest";
 
@@ -33,6 +37,10 @@ import * as RpcAuthorization from "./RpcAuthorization.ts";
 describe("RPC authorization scopes", () => {
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
+    expect(requiredScopeForRpcMethod(WS_METHODS.instaboxManage)).toBe(AuthEnvironmentMaintainScope);
+    expect(CLIENT_GUARDED_RPC_SCOPES[WS_METHODS.instaboxManage]).toBe(AuthEnvironmentMaintainScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.boatManage)).toBe(AuthEnvironmentMaintainScope);
+    expect(CLIENT_GUARDED_RPC_SCOPES[WS_METHODS.boatManage]).toBe(AuthEnvironmentMaintainScope);
   });
 
   it("keeps webhook delivery logs, which hold request bodies, behind operate scope", () => {
@@ -407,3 +415,62 @@ it.effect("denies manual cleanup before the handler without settings permission"
     expect(handled).toBe(false);
   }).pipe(Effect.scoped),
 );
+
+describe("cloud pairing authorization", () => {
+  const methods = [WS_METHODS.instaboxManage, WS_METHODS.boatManage] as const;
+  const group = WsRpcGroup.omit(
+    ...[...WsRpcGroup.requests.keys()].filter(
+      (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof methods)[number]> =>
+        !(methods as readonly string[]).includes(tag),
+    ),
+  );
+  it.effect.each(methods)("prevents %s from delegating permissions the caller lacks", (method) =>
+    Effect.gen(function* () {
+      let handled = 0;
+      const handler = () =>
+        Effect.sync(() => {
+          handled++;
+          return { configured: true, machines: [], snapshots: [] };
+        });
+      const makeClient = (scopes: ReadonlyArray<(typeof AuthStandardClientScopes)[number]>) =>
+        RpcTest.makeClient(group).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              group.toLayerHandler(WS_METHODS.instaboxManage, handler),
+              group.toLayerHandler(WS_METHODS.boatManage, handler),
+              RpcAuthorization.layer(scopes),
+            ),
+          ),
+        );
+      for (const missing of [AuthAccessWriteScope, AuthTerminalOperateScope]) {
+        const client = yield* makeClient(
+          AuthStandardClientScopes.filter((scope) => scope !== missing),
+        );
+        for (const input of [
+          { action: "create", name: "test" },
+          { action: "connect", machineId: "m_test" },
+        ] as const) {
+          expect(yield* client[method](input).pipe(Effect.flip)).toMatchObject({
+            _tag: "EnvironmentAuthorizationError",
+            requiredPermission: missing,
+          });
+        }
+      }
+      expect(handled).toBe(0);
+      const limited = yield* makeClient([AuthEnvironmentMaintainScope]);
+      yield* limited[method]({ action: "list" });
+      for (const input of [
+        { action: "configure", apiKey: Redacted.make("test") },
+        { action: "disconnect" },
+      ] as const) {
+        expect(yield* limited[method](input).pipe(Effect.flip)).toMatchObject({
+          _tag: "EnvironmentAuthorizationError",
+          requiredPermission: AuthSettingsWriteScope,
+        });
+      }
+      const full = yield* makeClient(AuthStandardClientScopes);
+      yield* full[method]({ action: "create", name: "test" });
+      expect(handled).toBe(2);
+    }).pipe(Effect.scoped),
+  );
+});
